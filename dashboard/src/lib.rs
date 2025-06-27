@@ -23,7 +23,7 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use sysinfo::System as SysInfoSystem;
+use sysinfo::{Process, System as SysInfoSystem};
 use tokio::sync::broadcast;
 pub mod globals;
 mod models;
@@ -50,8 +50,8 @@ fn collect_system_snapshot() -> SystemSnapshot {
     sys.refresh_all();
 
     let maybe_process = sys.process(pid);
-    let process_cpu = maybe_process.map_or(0.0, |process| process.cpu_usage());
-    let process_mem = maybe_process.map_or(0, |process| process.memory());
+    let process_cpu = maybe_process.map_or(0.0, Process::cpu_usage);
+    let process_mem = maybe_process.map_or(0, Process::memory);
 
     SystemSnapshot {
         timestamp: SystemTime::now()
@@ -187,8 +187,7 @@ pub async fn route_tracker(
 }
 
 fn save_metrics_to_file(path: &str, data: &PersistentMetricsData) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(data)
-        .map_err(|error| Error::new(std::io::ErrorKind::Other, error))?;
+    let json = serde_json::to_string_pretty(data).map_err(Error::other)?;
     fs::write(path, json)
 }
 

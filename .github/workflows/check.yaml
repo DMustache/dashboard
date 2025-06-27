@@ -1,0 +1,31 @@
+name: Check
+
+on:
+  - workflow_dispatch
+  - push
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  rust_checks:
+    name: Validate Rust codebase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch repository data
+        uses: actions/checkout@v4
+
+      - name: Configure Rust
+        run: |
+          RUST_VERSION=1.87.0
+          rustup update $RUST_VERSION
+          rustup default $RUST_VERSION
+          rustup component add clippy
+          rustup component add rustfmt
+
+      - name: Run linting checks
+        run: cargo clippy --all-targets --all-features -- -W clippy::pedantic -A clippy::cast_precision_loss -A clippy::cast_possible_wrap -A clippy::too_many_lines -A clippy::missing_panics_doc -A clippy::must_use_candidate -Dwarnings
+
+      - name: Run formatting checks
+        run: cargo fmt --check
