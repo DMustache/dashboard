@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Rust Metrics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        h1,
+        h2 {
+            color: #333;
+            margin-top: 0;
+        }
+
+        .controls {
+            padding: 10px;
+            background: white;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 10px;
+            background: #eee;
+            padding: 5px;
+            border-radius: 8px;
+        }
+
+        .tab {
+            padding: 8px 15px;
+            background-color: #ddd;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-right: 5px;
+            border: 1px solid #ccc;
+        }
+
+        .tab.active {
+            background-color: white;
+            border-bottom: 2px solid #4CAF50;
+            font-weight: bold;
+        }
+
+        .tab-content {
+            display: none;
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 15px;
+            width: 100%;
+        }
+
+        .chart-container {
+            background: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            position: relative;
+            height: 300px;
+        }
+
+        .chart-container canvas {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .stats-container,
+        .blacklist-container,
+        .persistence-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            margin-bottom: 15px;
+            width: 100%;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+
+        th,
+        td {
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+            font-size: 0.9em;
+        }
+
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        .button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .button:hover {
+            background-color: #45a049;
+        }
+
+        .button.danger {
+            background-color: #f44336;
+        }
+
+        .button.danger:hover {
+            background-color: #da190b;
+        }
+
+        .button.secondary {
+            background-color: #007bff;
+        }
+
+        .button.secondary:hover {
+            background-color: #0056b3;
+        }
+
+        input[type="text"],
+        input[type="datetime-local"] {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 5px;
+        }
+
+        .blacklist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .blacklist-item span {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Rust Metrics Dashboard</h1>
+
+    <div class="controls">
+        <button id="saveMetricsBtn" class="button">Save Metrics</button>
+        <button id="loadMetricsBtn" class="button secondary">Load Metrics</button>
+        <span style="margin-left: auto;">Status: <span id="ws-status">Connecting...</span></span>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="metrics">Metrics</div>
+        <div class="tab" data-tab="settings">Settings</div>
+    </div>
+
+    <div class="tab-content active" id="metrics-tab">
+        <div class="dashboard-grid">
+            <div class="chart-container">
+                <h2>Process Memory Usage</h2>
+                <canvas id="memoryChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Process CPU Usage</h2>
+                <canvas id="cpuChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Memory Allocations/Deallocations</h2>
+                <canvas id="allocationsChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Current Allocated Memory</h2>
+                <canvas id="currentMemoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-content" id="routes-tab">
+        <div class="stats-container">
+            <h2>Route Statistics</h2>
+            <table id="routeStatsTable">
+                <thead>
+                    <tr>
+                        <th>Route</th>
+                        <th>Calls</th>
+                        <th>Avg Duration (ms)</th>
+                        <th>Sliding Avg Duration (ms)</th>
+                        <th>Min/Max Duration (ms)</th>
+                        <th>Success/Errors</th>
+                        <th>Avg Mem Delta (bytes)</th>
+                        <th>Sliding Avg Mem Delta (bytes)</th>
+                        <th>Min/Max Mem Delta (bytes)</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div class="stats-container">
+            <h2>Recent Route Calls</h2>
+            <table id="routeCallsTable">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Method</th>
+                        <th>Path</th>
+                        <th>Duration (ms)</th>
+                        <th>Status</th>
+                        <th>Mem Delta (bytes)</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="tab-content" id="memory-tab">
+        <div class="dashboard-grid">
+            <div class="chart-container">
+                <h2>Memory Allocation Sizes</h2>
+                <canvas id="memorySizesChart"></canvas>
+            </div>
+        </div>
+        <div class="stats-container">
+            <h2>Memory Statistics</h2>
+            <table id="memoryStatsTable">
+                <tbody>
+                    <tr>
+                        <td>Total Allocations</td>
+                        <td id="totalAllocations">0</td>
+                    </tr>
+                    <tr>
+                        <td>Total Deallocations</td>
+                        <td id="totalDeallocations">0</td>
+                    </tr>
+                    <tr>
+                        <td>Current Memory</td>
+                        <td id="currentMemoryValue">0 B</td>
+                    </tr>
+                    <tr>
+                        <td>Peak Memory</td>
+                        <td id="peakMemoryValue">0 B</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="stats-container">
+            <h2>Recent Memory Events</h2>
+            <div id="memoryEventsContainer" style="max-height: 300px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <div class="tab-content" id="settings-tab">
+        <div class="persistence-container">
+            <h2>Data Persistence</h2>
+            <p>Manage saved metrics data.</p>
+            <div>
+                <label for="delete-start-time">Delete data from:</label>
+                <input type="datetime-local" id="delete-start-time">
+                <label for="delete-end-time">to:</label>
+                <input type="datetime-local" id="delete-end-time">
+                <button id="deleteMetricsBtn" class="button danger">Delete Data</button>
+            </div>
+        </div>
+        <div class="blacklist-container">
+            <h2>Route Blacklist</h2>
+            <p>Routes listed here will not be tracked.</p>
+            <div id="blacklistItems"></div>
+            <div>
+                <input type="text" id="newBlacklistItem" placeholder="e.g., GET /metrics">
+                <button id="addBlacklistItemBtn" class="button">Add to Blacklist</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'second',
+                        displayFormats: { second: 'HH:mm:ss' }
+                    },
+                    ticks: { source: 'auto', maxRotation: 0, autoSkip: true }
+                },
+                y: { beginAtZero: true }
+            },
+            plugins: { legend: { display: true } }
+        };
+
+        const memoryChart = new Chart(document.getElementById('memoryChart').getContext('2d'), {
+            type: 'line',
+            data: { datasets: [{ label: 'Process Memory (MB)', data: [], borderColor: 'rgba(75, 192, 192, 1)', tension: 0.1 }] },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, title: { display: true, text: 'MB' } } } }
+        });
+        const cpuChart = new Chart(document.getElementById('cpuChart').getContext('2d'), {
+            type: 'line',
+            data: { datasets: [{ label: 'Process CPU (%)', data: [], borderColor: 'rgba(255, 99, 132, 1)', tension: 0.1 }] },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, title: { display: true, text: '%' } } } }
+        });
+        const allocationsChart = new Chart(document.getElementById('allocationsChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                datasets: [
+                    { label: 'Allocations (bytes)', data: [], borderColor: 'rgba(54, 162, 235, 1)', tension: 0.1 },
+                    { label: 'Deallocations (bytes)', data: [], borderColor: 'rgba(255, 159, 64, 1)', tension: 0.1 }
+                ]
+            },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, title: { display: true, text: 'Bytes' } } } }
+        });
+        const currentMemoryChart = new Chart(document.getElementById('currentMemoryChart').getContext('2d'), {
+            type: 'line',
+            data: { datasets: [{ label: 'Current Allocated (MB)', data: [], borderColor: 'rgba(153, 102, 255, 1)', tension: 0.1 }] },
+            options: { ...chartOptions, scales: { ...chartOptions.scales, y: { ...chartOptions.scales.y, title: { display: true, text: 'MB' } } } }
+        });
+        const memorySizesChart = new Chart(document.getElementById('memorySizesChart').getContext('2d'), {
+            type: 'bar',
+            data: { labels: [], datasets: [{ label: 'Allocation Count by Size', data: [], backgroundColor: 'rgba(75, 192, 192, 0.6)' }] },
+            options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { beginAtZero: true } } }
+        });
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === null || bytes === undefined) return 'N/A';
+            const isNegative = bytes < 0;
+            bytes = Math.abs(bytes);
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            const value = parseFloat((bytes / Math.pow(k, i)).toFixed(dm));
+            return (isNegative ? '-' : '') + value + ' ' + sizes[i];
+        }
+
+        function formatTimestamp(unixSeconds) {
+            return new Date(unixSeconds * 1000).toLocaleTimeString();
+        }
+
+        function addData(chart, timestamp, value) {
+            chart.data.labels.push(timestamp);
+            chart.data.datasets.forEach((dataset) => {
+                if (chart === allocationsChart && typeof value === 'object') {
+                    if (dataset.label.startsWith('Allocations')) dataset.data.push(value.allocations);
+                    if (dataset.label.startsWith('Deallocations')) dataset.data.push(value.deallocations);
+                } else {
+                    dataset.data.push(value);
+                }
+            });
+            // Limit data points
+            const maxPoints = 60;
+            if (chart.data.labels.length > maxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach((dataset) => dataset.data.shift());
+            }
+        }
+
+        function updateMetricsCharts(snapshot) {
+            const timestamp = snapshot.timestamp * 1000;
+            addData(memoryChart, timestamp, snapshot.process_memory_usage / (1024 * 1024));
+            addData(cpuChart, timestamp, snapshot.process_cpu_usage);
+            addData(allocationsChart, timestamp, { allocations: snapshot.allocations, deallocations: snapshot.deallocations });
+            addData(currentMemoryChart, timestamp, snapshot.current_memory / (1024 * 1024));
+
+            memoryChart.update('none');
+            cpuChart.update('none');
+            allocationsChart.update('none');
+            currentMemoryChart.update('none');
+        }
+
+        function updateRouteStatsTable(stats) {
+            const tbody = document.querySelector('#routeStatsTable tbody');
+            tbody.innerHTML = '';
+            Object.entries(stats).sort().forEach(([route, stat]) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                            <td>${route}</td>
+                            <td>${stat.total_calls}</td>
+                            <td>${stat.avg_duration_ms.toFixed(2)}</td>
+                            <td>${stat.sliding_avg_duration_ms.toFixed(2)}</td> <!-- Updated -->
+                            <td>${stat.min_duration_ms === Number.MAX_SAFE_INTEGER ? 'N/A' : stat.min_duration_ms}/${stat.max_duration_ms}</td>
+                            <td>${stat.success_count}/${stat.error_count}</td>
+                            <td>${formatBytes(stat.avg_memory_delta_bytes, 0)}</td>
+                            <td>${formatBytes(stat.sliding_avg_memory_delta_bytes, 0)}</td> <!-- Updated -->
+                            <td>${stat.min_memory_delta_bytes === Number.MAX_SAFE_INTEGER ? 'N/A' : formatBytes(stat.min_memory_delta_bytes, 0)}/${stat.max_memory_delta_bytes === Number.MIN_SAFE_INTEGER ? 'N/A' : formatBytes(stat.max_memory_delta_bytes, 0)}</td>
+                        `;
+            });
+        }
+
+        function updateRouteCallsTable(calls) {
+            const tbody = document.querySelector('#routeCallsTable tbody');
+            tbody.innerHTML = '';
+            calls.slice().reverse().forEach(call => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                            <td>${formatTimestamp(call.timestamp)}</td>
+                            <td>${call.method}</td>
+                            <td>${call.path}</td>
+                            <td>${call.duration_ms ?? 'N/A'}</td>
+                            <td>${call.status_code ?? 'N/A'}</td>
+                            <td>${formatBytes(call.memory_delta_bytes, 0)}</td>
+                        `;
+            });
+        }
+
+        function updateMemoryStats(stats) {
+            document.getElementById('totalAllocations').textContent = stats.total_allocations;
+            document.getElementById('totalDeallocations').textContent = stats.total_deallocations;
+            document.getElementById('currentMemoryValue').textContent = formatBytes(stats.current_memory);
+            document.getElementById('peakMemoryValue').textContent = formatBytes(stats.peak_memory);
+
+            const labels = Object.keys(stats.allocation_sizes || {});
+            const data = Object.values(stats.allocation_sizes || {});
+            memorySizesChart.data.labels = labels;
+            memorySizesChart.data.datasets[0].data = data;
+            memorySizesChart.update('none');
+        }
+
+        function updateMemoryEvents(events) {
+            const container = document.getElementById('memoryEventsContainer');
+            container.innerHTML = '';
+            events.slice().reverse().forEach(event => {
+                const div = document.createElement('div');
+                div.style.marginBottom = '5px';
+                div.style.padding = '5px';
+                div.style.borderLeft = `3px solid ${event.allocation_type === 'alloc' ? 'green' : (event.allocation_type === 'dealloc' ? 'red' : 'grey')}`;
+                div.style.backgroundColor = event.allocation_type === 'alloc' ? '#e8f5e9' : (event.allocation_type === 'dealloc' ? '#ffebee' : '#f5f5f5');
+                div.innerHTML = `
+                            ${formatTimestamp(event.timestamp)} - ${event.allocation_type}: ${formatBytes(event.size)}
+                            ${event.stack_trace ? `<pre style="font-size: 0.8em; color: grey;">${event.stack_trace}</pre>` : ''}
+                        `;
+                container.appendChild(div);
+            });
+        }
+
+        function updateBlacklistUI(blacklist) {
+            const container = document.getElementById('blacklistItems');
+            container.innerHTML = '';
+            blacklist.sort().forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'blacklist-item';
+                div.innerHTML = `
+                            <span>${item}</span>
+                            <button class="button danger" data-item="${item}">Remove</button>
+                        `;
+                container.appendChild(div);
+            });
+            container.querySelectorAll('.danger').forEach(button => {
+                button.addEventListener('click', () => removeBlacklistItem(button.dataset.item));
+            });
+        }
+
+        let ws;
+        function connectWebSocket() {
+            const wsStatus = document.getElementById('ws-status');
+            wsStatus.textContent = 'Connecting...';
+            ws = new WebSocket(`ws://${location.host}/metrics-ws`);
+
+            ws.onopen = () => wsStatus.textContent = 'Connected';
+            ws.onclose = () => {
+                wsStatus.textContent = 'Disconnected. Retrying...';
+                setTimeout(connectWebSocket, 5000);
+            };
+            ws.onerror = () => wsStatus.textContent = 'Error';
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    // Update all UI components
+                    if (data.system_snapshot) updateMetricsCharts(data.system_snapshot);
+                    if (data.route_stats) updateRouteStatsTable(data.route_stats);
+                    if (data.recent_route_calls) updateRouteCallsTable(data.recent_route_calls);
+                    if (data.memory_stats) updateMemoryStats(data.memory_stats);
+                    if (data.recent_memory_events) updateMemoryEvents(data.recent_memory_events);
+                    if (data.blacklist) updateBlacklistUI(data.blacklist);
+                } catch (e) {
+                    console.error("Failed to parse WebSocket message:", e);
+                }
+            };
+        }
+        connectWebSocket();
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function () {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById(this.getAttribute('data-tab') + '-tab').classList.add('active');
+            });
+        });
+
+        document.getElementById('saveMetricsBtn').addEventListener('click', () => {
+            fetch('/save-metrics', { method: 'POST' })
+                .then(res => res.ok ? alert('Metrics saved successfully.') : alert('Failed to save metrics.'))
+                .catch(err => alert('Error saving metrics: ' + err));
+        });
+
+        document.getElementById('loadMetricsBtn').addEventListener('click', () => {
+            if (!confirm('Loading metrics will merge saved data with current data. Continue?')) return;
+            fetch('/load-metrics', { method: 'POST' })
+                .then(res => res.ok ? alert('Metrics loaded successfully. Refreshing data...') : alert('Failed to load metrics.'))
+                .catch(err => alert('Error loading metrics: ' + err));
+        });
+
+        document.getElementById('deleteMetricsBtn').addEventListener('click', () => {
+            const start = document.getElementById('delete-start-time').value;
+            const end = document.getElementById('delete-end-time').value;
+            if (!start || !end) {
+                alert('Please select both start and end times for deletion.');
+                return;
+            }
+            const startTime = new Date(start).getTime() / 1000;
+            const endTime = new Date(end).getTime() / 1000;
+            if (isNaN(startTime) || isNaN(endTime) || startTime >= endTime) {
+                alert('Invalid date range selected.');
+                return;
+            }
+            if (!confirm(`Delete all metrics data between ${start} and ${end}? This cannot be undone.`)) return;
+
+            fetch('/delete-metrics', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ start_time: startTime, end_time: endTime })
+            })
+                .then(res => res.ok ? alert('Metrics data deleted successfully.') : alert('Failed to delete metrics.'))
+                .catch(err => alert('Error deleting metrics: ' + err));
+        });
+
+        document.getElementById('addBlacklistItemBtn').addEventListener('click', () => {
+            const newItemInput = document.getElementById('newBlacklistItem');
+            const newItem = newItemInput.value.trim();
+            if (!newItem) return;
+            if (!/^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s+\/\S*$/.test(newItem)) {
+                alert('Invalid format. Use METHOD /path (e.g., GET /api/users)');
+                return;
+            }
+            fetch('/blacklist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item: newItem })
+            })
+                .then(res => {
+                    if (res.ok) newItemInput.value = '';
+                    else alert('Failed to add item to blacklist.');
+                })
+                .catch(err => alert('Error adding item: ' + err));
+        });
+
+        function removeBlacklistItem(item) {
+            if (!confirm(`Remove "${item}" from the blacklist?`)) return;
+            fetch('/blacklist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item: item })
+            })
+                .then(res => {
+                    if (!res.ok) alert('Failed to remove item from blacklist.');
+                })
+                .catch(err => alert('Error removing item: ' + err));
+
+        }
+
+    </script>
+</body>
+
+</html>
