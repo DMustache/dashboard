@@ -1,18 +1,15 @@
 [package]
-name = "dashboard"
+name = "basic_example"
 version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
 
-
 [dependencies]
 axum.workspace = true
+axum-server.workspace = true
+
+serde.workspace = true
 
 tokio.workspace = true
 
-sysinfo.workspace = true
-
-serde.workspace = true
-serde_json.workspace = true
-
-ctrlc.workspace = true
+dashboard.workspace = true
